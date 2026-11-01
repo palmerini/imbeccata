@@ -26,11 +26,29 @@
   .nascosto { filter:blur(7px); user-select:none; }
   #aiuto { position:fixed; bottom:0; left:0; right:0; background:var(--bg); border-top:1px solid var(--line); padding:12px 16px; text-align:center; font:15px system-ui, sans-serif; }
   #aiuto button { font-size:17px; padding:10px 24px; }
+  .vuoto { color:var(--muted); text-align:center; margin-top:48px; font-style:italic; }
+  dialog { background:var(--bg); color:var(--fg); border:1px solid var(--line); border-radius:14px; padding:18px 20px; width:min(560px, calc(100vw - 32px)); font:15px/1.45 system-ui, sans-serif; }
+  dialog::backdrop { background:rgba(0,0,0,.45); }
+  dialog h2 { margin:0 0 10px; font:600 19px Georgia, serif; }
+  dialog h2 small { font:14px system-ui, sans-serif; color:var(--muted); font-weight:normal; }
+  #lista { list-style:none; padding:0; margin:0 0 14px; }
+  #lista li { display:flex; gap:10px; align-items:center; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--line); }
+  #lista .t { font-weight:600; }
+  #lista .s { color:var(--muted); font-size:13px; }
+  #lista .nessuno { color:var(--muted); font-style:italic; justify-content:flex-start; }
+  button.pericolo { color:var(--accent); border-color:var(--accent); }
+  #carica { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:8px; }
+  #carica input { flex:1 1 200px; min-width:0; }
+  #prog { width:100%; }
+  #stato { min-height:1.4em; margin:6px 0; }
+  #stato.errore { color:var(--accent); font-weight:600; }
+  dialog details { margin:8px 0 14px; color:var(--muted); }
+  dialog pre { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:8px 10px; overflow:auto; font-size:13px; color:var(--fg); }
 </style>
 </head>
 <body>
 <header>
-  <h1 id="titolo">Prova battute</h1>
+  <h1 id="titolo">Imbeccata</h1>
   <div class="row">
     <label>Opera <select id="opera"></select></label>
     <label>Io sono <select id="io"></select></label>
@@ -49,6 +67,7 @@
     </label>
     <button class="primary" id="play">▶ Inizia da qui</button>
     <button id="stop">■ Stop</button>
+    <button id="copioni">Copioni…</button>
   </div>
 </header>
 <main id="testo"></main>
@@ -58,16 +77,148 @@
   <button id="suggerisci">Suggerimento</button>
 </div>
 
+<dialog id="dlg">
+  <h2>I tuoi copioni <small id="contatore"></small></h2>
+  <ul id="lista"></ul>
+  <div id="carica">
+    <input type="file" id="file" accept=".txt,.pdf,text/plain,application/pdf">
+    <button class="primary" id="aggiungi">Aggiungi</button>
+  </div>
+  <progress id="prog" hidden></progress>
+  <p id="stato" role="status"></p>
+  <details>
+    <summary>Come deve essere scritto il copione</summary>
+    <p>File di testo (.txt) con una battuta per personaggio, oppure un PDF impaginato come i copioni di Paolo Palmerini
+       (sezione PERSONAGGI e battute "NOME testo"). Esempio di testo:</p>
+<pre># Titolo
+## Scena 1
+(Una didascalia su una riga)
+MARIA: Buongiorno!
+GIORGIO: (sorridendo) Bene, grazie.
+MARIA/GIORGIO: Una battuta detta insieme.</pre>
+    <p>Le didascalie tra parentesi non vengono lette ad alta voce. La generazione dell'audio richiede
+       qualche minuto per i copioni lunghi.</p>
+  </details>
+  <button id="chiudi">Chiudi</button>
+</dialog>
+
 <script>
 const $ = id => document.getElementById(id);
 let opera = null, nome = null, idx = 0, running = false, token = 0;
 const audio = new Audio();
 
+let elenco = [], occupato = false;
+
+// Allinea menu e pannello all'elenco sul server; `scegli` = copione da aprire.
+async function sincronizza(scegli) {
+  const d = await (await fetch('api/opere')).json();
+  elenco = d.opere;
+  const corrente = scegli || $('opera').value;
+  $('opera').replaceChildren(...elenco.map(o => new Option(o.titolo, o.nome)));
+  disegnaPannello(d);
+  if (!elenco.length) {
+    stop(); opera = null; nome = null;
+    $('titolo').textContent = 'Imbeccata';
+    $('io').replaceChildren();
+    $('testo').innerHTML = '<p class="vuoto">Nessun copione: aggiungine uno da «Copioni…».</p>';
+    return d;
+  }
+  const nuovo = elenco.some(o => o.nome === corrente) ? corrente : elenco[0].nome;
+  $('opera').value = nuovo;
+  if (nuovo !== nome || scegli) await carica(nuovo);
+  return d;
+}
+
 async function init() {
-  const lista = await (await fetch('opere/index.json')).json();
-  $('opera').innerHTML = lista.map(n => `<option>${n}</option>`).join('');
   $('opera').onchange = () => carica($('opera').value);
-  await carica(lista[0]);
+  const d = await sincronizza();
+  if (d.in_corso) { $('dlg').showModal(); seguiJob(d.in_corso.job); }
+  else if (!elenco.length) $('dlg').showModal();
+}
+
+// ---------- pannello copioni
+function stato(testo, errore = false) {
+  $('stato').textContent = testo;
+  $('stato').className = errore ? 'errore' : '';
+}
+
+function disegnaPannello(d) {
+  $('contatore').textContent = `${d.opere.length} di ${d.max}`;
+  const ul = $('lista');
+  ul.replaceChildren();
+  if (!d.opere.length) {
+    const li = document.createElement('li');
+    li.className = 'nessuno';
+    li.textContent = 'Nessun copione caricato.';
+    ul.appendChild(li);
+  }
+  d.opere.forEach(o => {
+    const li = document.createElement('li');
+    const info = document.createElement('div');
+    const t = document.createElement('div'); t.className = 't'; t.textContent = o.titolo;
+    const s = document.createElement('div'); s.className = 's';
+    s.textContent = `${o.personaggi.length} personaggi · ${o.battute} battute · ${o.mb} MB`;
+    info.append(t, s);
+    const b = document.createElement('button');
+    b.className = 'pericolo'; b.textContent = 'Elimina';
+    b.onclick = () => elimina(o);
+    li.append(info, b);
+    ul.appendChild(li);
+  });
+  const pieno = d.opere.length >= d.max;
+  $('file').disabled = $('aggiungi').disabled = pieno || occupato || !!d.in_corso;
+  if (pieno && !occupato && !$('stato').textContent) stato(`Hai già ${d.max} copioni: eliminane uno per aggiungerne un altro.`);
+}
+
+async function elimina(o) {
+  if (!confirm(`Eliminare «${o.titolo}»? Dovrai ricaricarlo per riaverlo.`)) return;
+  const r = await fetch('api/opere/' + encodeURIComponent(o.nome), { method: 'DELETE' });
+  if (!r.ok) stato((await r.json()).errore, true);
+  else stato('');
+  await sincronizza();
+}
+
+async function aggiungi() {
+  const f = $('file').files[0];
+  if (!f) return stato('Scegli prima un file .txt o .pdf.', true);
+  occupato = true; $('file').disabled = $('aggiungi').disabled = true;
+  stato('Carico il file…');
+  try {
+    const r = await fetch('api/opere', { method: 'POST', headers: { 'X-Nome': encodeURIComponent(f.name) }, body: f });
+    const j = await r.json();
+    if (!r.ok) { stato(j.errore, true); return; }
+    await seguiJob(j.job);
+  } catch (e) {
+    stato('Errore di rete: ' + e.message, true);
+  } finally {
+    occupato = false;
+    await sincronizza();
+  }
+}
+
+async function seguiJob(job) {
+  occupato = true;
+  const p = $('prog');
+  p.hidden = false;
+  try {
+    for (;;) {
+      const st = await (await fetch('api/jobs/' + job)).json();
+      p.max = st.totale || 1; p.value = st.fatte;
+      if (st.stato === 'finito') {
+        stato('Fatto! Copione aggiunto.');
+        $('file').value = '';
+        await sincronizza(st.nome);
+        return;
+      }
+      if (st.stato === 'errore') { stato(st.errore, true); return; }
+      stato(`Genero l'audio: ${st.fatte} di ${st.totale} battute…`);
+      await sleep(700);
+    }
+  } finally {
+    p.hidden = true;
+    occupato = false;
+    await sincronizza();
+  }
 }
 
 async function carica(n) {
@@ -118,7 +269,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function suonaClip(file) {
   return new Promise(res => {
-    audio.src = `opere/${nome}/audio/${file}`;
+    audio.src = `audio/${file}`;
     audio.onended = audio.onerror = res;
     audio.play().catch(res);
   });
@@ -136,6 +287,7 @@ function attendiTap(my) {
 let stopWait = () => {};
 
 async function run() {
+  if (!opera) return;
   const mio = ++token;
   running = true;
   $('play').disabled = true;
@@ -166,6 +318,9 @@ function stop() {
 
 $('play').onclick = run;
 $('stop').onclick = stop;
+$('copioni').onclick = () => { stato(''); $('dlg').showModal(); sincronizza(); };
+$('chiudi').onclick = () => $('dlg').close();
+$('aggiungi').onclick = aggiungi;
 init();
 </script>
 </body>

@@ -9,9 +9,23 @@ con voce sintetica tutti i personaggi tranne quello dell'attore, che parla nei v
 2. `src/tts.py` genera una clip audio per battuta (Kokoro, open source) e la salva in `cache/`.
    La chiave di cache è `hash(motore + versione + voce + parametri + testo)`:
    una battuta già generata non viene mai rigenerata, e cambiare motore non invalida le altre.
-3. `src/build.py` costruisce il pacchetto in `web/opere/<nome>/` (manifest + clip).
-4. `web/index.html` è il player: scegli opera e personaggio, le altre battute vengono
+3. `src/libreria.py` gestisce i copioni: crea (`web/opere/<nome>/` con manifest, testo e cast),
+   elenca, elimina e ripulisce le clip non più usate. Le clip stanno solo in `cache/`.
+4. `src/server.py` è il server locale: serve il player e le API per aggiungere/eliminare copioni.
+5. `web/index.html` è il player: scegli opera e personaggio, le altre battute vengono
    riprodotte e sulle tue c'è una pausa (tap o automatica).
+
+## Gestire i copioni
+
+Dal pulsante **Copioni…** del player l'utente carica un file `.txt` o `.pdf`, vede
+l'avanzamento della generazione audio ed elimina i copioni che non gli servono più.
+Non c'è nessun login: l'app è pensata per un attore che carica il copione di volta in volta.
+
+- **Limite**: al massimo 3 copioni insieme, per limitare lo spazio su disco
+  (modificabile con la variabile d'ambiente `IMBECCATA_MAX_COPIONI`).
+- Eliminando un copione si cancellano anche le sue clip audio, a meno che le usi un altro copione.
+- Il nome del copione è quello del file; se ne esiste già uno con lo stesso nome va eliminato prima.
+- Il server ascolta solo su `127.0.0.1`.
 
 Per aggiungere un motore (anche a pagamento) basta una classe in `tts.py`
 con `id`, `version` e `synthesize()`, registrata in `ENGINES`, e indicarla nel file cast.
@@ -31,11 +45,16 @@ Al primo avvio Kokoro scarica il modello (circa 300 MB) da Hugging Face.
 ## Uso
 
 ```bash
-.venv/bin/python -I src/build.py testi/esempio.txt   # genera audio e pacchetto
-python3 -m http.server 8766 --directory web          # poi apri http://localhost:8766
+.venv/bin/python -I src/server.py     # poi apri http://localhost:8766 (porta opzionale: src/server.py 9000)
 ```
 
-Per convertire un copione PDF nel formato del progetto:
+Da riga di comando (stessa logica e stesso limite del pannello):
+
+```bash
+.venv/bin/python -I src/build.py testi/esempio.txt   # accetta .txt o .pdf
+```
+
+Per convertire un copione PDF nel formato del progetto, senza generare audio:
 
 ```bash
 .venv/bin/python -I src/pdf2txt.py copione.pdf testi/copione.txt
@@ -57,9 +76,11 @@ PERSONAGGIO: battuta, anche (con didascalia inline) che non viene letta.
 
 ## Cast
 
-`testi/<nome>.cast.json` assegna a ogni personaggio motore, voce e velocità.
-Se manca viene creato in automatico: controlla i generi delle voci
-(Kokoro in italiano ha solo `if_sara` femminile e `im_nicola` maschile).
+Ogni copione ha un `cast.json` (in `web/opere/<nome>/`) che assegna a ogni personaggio
+motore, voce e velocità. Con il caricamento dal player viene creato in automatico, alternando
+le due voci italiane di Kokoro (`if_sara` femminile, `im_nicola` maschile) senza conoscere il
+genere dei personaggi. Da riga di comando si può passare un cast scritto a mano
+(`testi/<nome>.cast.json`, vedi `testi/esempio.cast.json`).
 
 ## Licenza
 
@@ -68,7 +89,7 @@ hanno licenze proprie: controllale prima di distribuire l'audio generato.
 
 ## Da fare
 
-- Provare i PDF reali (richiedono la conversione in questo formato).
+- Scelta delle voci per personaggio dal player (ora è automatica).
 - Riconoscimento vocale per la pausa dell'attore.
 - Motori TTS aggiuntivi / a pagamento.
 - App mobile e pacchetti audio offline.
