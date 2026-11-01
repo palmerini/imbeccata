@@ -24,7 +24,10 @@ OPERE_DIR = ROOT / "web" / "opere"
 CACHE_DIR = ROOT / "cache"
 MAX_COPIONI = int(os.environ.get("IMBECCATA_MAX_COPIONI", "3"))
 MAX_BYTES = 8 * 1024 * 1024
-VOCI_IT = ["if_sara", "im_nicola"]
+VOCI = {"if_sara": "Sara (voce femminile)", "im_nicola": "Nicola (voce maschile)"}
+VOCI_IT = list(VOCI)
+SPEED_MIN, SPEED_MAX = 0.7, 1.3
+TESTO_ANTEPRIMA = "Buongiorno, questa è la mia voce. Come ti sembra?"
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,48}$")
 
 # Una sola generazione alla volta; protegge anche la pulizia della cache.
@@ -137,24 +140,99 @@ def genera(nome: str, testo: str, opera: dict, cast: dict | None = None, progres
         if mancanti:
             raise ErroreCopione(f"Personaggi senza voce nel cast: {mancanti}")
 
-        righe = [r for r in opera["righe"] if r["tipo"] == "battuta" and r["testo_tts"]]
-        for i, r in enumerate(righe, 1):
-            c = cast[r["personaggio"]]
-            r["audio"], r["durata"] = _cache.get(
-                c["engine"], r["testo_tts"], c["voce"], {"speed": c.get("speed", 1.0)}
-            )
-            r["durata"] = round(r["durata"], 2)
-            if progresso:
-                progresso(i, len(righe))
-
+        _sintetizza(opera, cast, progresso)
         dest.mkdir(parents=True, exist_ok=True)
         (dest / "copione.txt").write_text(testo, encoding="utf-8")
-        (dest / "cast.json").write_text(json.dumps(cast, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp = dest / "opera.json.tmp"
-        tmp.write_text(json.dumps(opera, ensure_ascii=False, indent=1), encoding="utf-8")
-        tmp.replace(dest / "opera.json")
+        _scrivi(dest, opera, cast)
         _pulisci_locked()
     return cast
+
+
+def _sintetizza(opera: dict, cast: dict, progresso=None) -> None:
+    """Assegna a ogni battuta la clip (generata solo se manca in cache)."""
+    righe = [r for r in opera["righe"] if r["tipo"] == "battuta" and r["testo_tts"]]
+    for i, r in enumerate(righe, 1):
+        c = cast[r["personaggio"]]
+        r["audio"], r["durata"] = _cache.get(
+            c["engine"], r["testo_tts"], c["voce"], {"speed": c.get("speed", 1.0)}
+        )
+        r["durata"] = round(r["durata"], 2)
+        if progresso:
+            progresso(i, len(righe))
+
+
+def _scrivi(dest: Path, opera: dict, cast: dict) -> None:
+    (dest / "cast.json").write_text(json.dumps(cast, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp = dest / "opera.json.tmp"
+    tmp.write_text(json.dumps(opera, ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp.replace(dest / "opera.json")
+
+
+def _speed(valore) -> float:
+    try:
+        v = round(float(valore), 2)
+    except (TypeError, ValueError):
+        raise ErroreCopione("Velocità non valida.")
+    if not SPEED_MIN <= v <= SPEED_MAX:
+        raise ErroreCopione(f"La velocità deve essere tra {SPEED_MIN} e {SPEED_MAX}.")
+    return v
+
+
+def _opera(nome: str) -> dict:
+    if not SLUG_RE.match(nome) or not (OPERE_DIR / nome / "opera.json").exists():
+        raise ErroreCopione("Copione non trovato.", 404)
+    return _leggi(OPERE_DIR / nome / "opera.json")
+
+
+def leggi_cast(nome: str) -> dict:
+    """Cast attuale di un copione + voci disponibili, per il pannello Voci."""
+    opera = _opera(nome)
+    cast = cast_default(opera)  # per i copioni senza cast.json (vecchio formato)
+    f = OPERE_DIR / nome / "cast.json"
+    if f.exists():
+        cast.update(_leggi(f))
+    return {
+        "personaggi": opera["personaggi"],
+        "cast": {p: cast[p] for p in opera["personaggi"]},
+        "voci": VOCI,
+        "speed": [SPEED_MIN, SPEED_MAX],
+    }
+
+
+def prepara_cast(nome: str, grezzo) -> tuple[dict, int]:
+    """Valida il cast ricevuto dal client. Ritorna (cast pulito, numero di clip)."""
+    opera = _opera(nome)
+    if not isinstance(grezzo, dict):
+        raise ErroreCopione("Cast non valido.")
+    cast = {}
+    for p in opera["personaggi"]:
+        c = grezzo.get(p)
+        if not isinstance(c, dict) or c.get("voce") not in VOCI:
+            raise ErroreCopione(f"Voce non valida per {p}.")
+        cast[p] = {"engine": "kokoro", "voce": c["voce"], "speed": _speed(c.get("speed", 1.0))}
+    return cast, n_clip(opera)
+
+
+def cambia_cast(nome: str, cast: dict, progresso=None) -> None:
+    """Applica un nuovo cast: rigenera solo le clip che non sono già in cache."""
+    with lock:
+        opera = _opera(nome)
+        _sintetizza(opera, cast, progresso)
+        _scrivi(OPERE_DIR / nome, opera, cast)
+        _pulisci_locked()
+
+
+def anteprima(voce: str, speed) -> str:
+    """Clip di prova per ascoltare una voce; ritorna il nome del file in cache."""
+    if voce not in VOCI:
+        raise ErroreCopione("Voce non valida.")
+    speed = _speed(speed)
+    if not lock.acquire(blocking=False):
+        raise ErroreCopione("Sto generando l'audio di un copione: riprova tra poco.", 409)
+    try:
+        return _cache.get("kokoro", TESTO_ANTEPRIMA, voce, {"speed": speed})[0]
+    finally:
+        lock.release()
 
 
 def elimina(nome: str) -> None:

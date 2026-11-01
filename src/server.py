@@ -8,6 +8,9 @@ API:
     POST   /api/opere          -> corpo = file .txt/.pdf, header X-Nome = nome del file (url-encoded)
     GET    /api/jobs/<id>      -> avanzamento della generazione audio
     DELETE /api/opere/<nome>   -> elimina il copione e le clip non più usate
+    GET    /api/opere/<nome>/cast  -> voci attuali + voci disponibili
+    PUT    /api/opere/<nome>/cast  -> corpo JSON {PERSONAGGIO: {voce, speed}}; rigenera le clip cambiate
+    GET    /api/anteprima?voce=&speed=  -> clip di prova per ascoltare una voce
     GET    /audio/<hash>.wav   -> clip audio (da cache/, con supporto Range per Safari)
 """
 import json
@@ -36,16 +39,25 @@ def job_in_corso() -> dict | None:
     return None
 
 
-def lavora(job: str, nome: str, testo: str, opera: dict) -> None:
-    st = JOBS[job]
-    try:
-        lib.genera(nome, testo, opera, progresso=lambda i, tot: st.update(fatte=i, totale=tot))
-        st["stato"] = "finito"
-    except ErroreCopione as e:
-        st.update(stato="errore", errore=str(e))
-    except Exception as e:  # noqa: BLE001
-        traceback.print_exc()
-        st.update(stato="errore", errore=f"Errore imprevisto: {e}")
+def avvia_job(nome: str, totale: int, fn) -> str:
+    """Esegue fn(progresso) in un thread. Da chiamare con JOBS_LOCK preso."""
+    global corrente
+    job = uuid.uuid4().hex[:8]
+    st = JOBS[job] = {"stato": "in_corso", "nome": nome, "fatte": 0, "totale": totale, "errore": None}
+    corrente = job
+
+    def run():
+        try:
+            fn(lambda i, tot: st.update(fatte=i, totale=tot))
+            st["stato"] = "finito"
+        except ErroreCopione as e:
+            st.update(stato="errore", errore=str(e))
+        except Exception as e:  # noqa: BLE001
+            traceback.print_exc()
+            st.update(stato="errore", errore=f"Errore imprevisto: {e}")
+
+    threading.Thread(target=run, daemon=True).start()
+    return job
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -77,6 +89,17 @@ class Handler(SimpleHTTPRequestHandler):
         if p.startswith("/api/jobs/"):
             st = JOBS.get(p.rsplit("/", 1)[1])
             return self.json(200, st) if st else self.json(404, {"errore": "Job sconosciuto."})
+        if m := re.fullmatch(r"/api/opere/([^/]+)/cast", p):
+            try:
+                return self.json(200, lib.leggi_cast(urllib.parse.unquote(m.group(1))))
+            except ErroreCopione as e:
+                return self.json(e.codice, {"errore": str(e)})
+        if p == "/api/anteprima":
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            try:
+                return self.json(200, {"audio": lib.anteprima(q.get("voce", [""])[0], q.get("speed", ["1.0"])[0])})
+            except ErroreCopione as e:
+                return self.json(e.codice, {"errore": str(e)})
         if p.startswith("/audio/"):
             return self.audio(p[len("/audio/"):])
         super().do_GET()
@@ -114,7 +137,6 @@ class Handler(SimpleHTTPRequestHandler):
 
     # ---------- POST: carica un copione
     def do_POST(self):
-        global corrente
         if urllib.parse.urlparse(self.path).path != "/api/opere":
             return self.json(404, {"errore": "Non trovato."})
         n = int(self.headers.get("Content-Length") or 0)
@@ -137,10 +159,30 @@ class Handler(SimpleHTTPRequestHandler):
             nome = lib.slugify(Path(nome_file).stem)
             if (lib.OPERE_DIR / nome / "opera.json").exists():
                 return self.json(409, {"errore": "Esiste già un copione con questo nome: eliminalo prima o rinomina il file."})
-            job = uuid.uuid4().hex[:8]
-            JOBS[job] = {"stato": "in_corso", "nome": nome, "fatte": 0, "totale": lib.n_clip(opera), "errore": None}
-            corrente = job
-        threading.Thread(target=lavora, args=(job, nome, testo, opera), daemon=True).start()
+            job = avvia_job(nome, lib.n_clip(opera), lambda prog: lib.genera(nome, testo, opera, progresso=prog))
+        self.json(202, {"job": job, "nome": nome})
+
+    # ---------- PUT: cambia le voci di un copione
+    def do_PUT(self):
+        m = re.fullmatch(r"/api/opere/([^/]+)/cast", urllib.parse.urlparse(self.path).path)
+        if not m:
+            return self.json(404, {"errore": "Non trovato."})
+        n = int(self.headers.get("Content-Length") or 0)
+        if not 0 < n <= 65536:
+            return self.json(400, {"errore": "Richiesta non valida."})
+        try:
+            grezzo = json.loads(self.rfile.read(n))
+        except ValueError:
+            return self.json(400, {"errore": "Richiesta non valida."})
+        nome = urllib.parse.unquote(m.group(1))
+        with JOBS_LOCK:
+            if job_in_corso():
+                return self.json(409, {"errore": "Sto già elaborando un copione: aspetta che finisca."})
+            try:
+                cast, totale = lib.prepara_cast(nome, grezzo)
+            except ErroreCopione as e:
+                return self.json(e.codice, {"errore": str(e)})
+            job = avvia_job(nome, totale, lambda prog: lib.cambia_cast(nome, cast, prog))
         self.json(202, {"job": job, "nome": nome})
 
     # ---------- DELETE: elimina un copione

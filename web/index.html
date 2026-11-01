@@ -32,7 +32,15 @@
   dialog h2 { margin:0 0 10px; font:600 19px Georgia, serif; }
   dialog h2 small { font:14px system-ui, sans-serif; color:var(--muted); font-weight:normal; }
   #lista { list-style:none; padding:0; margin:0 0 14px; }
-  #lista li { display:flex; gap:10px; align-items:center; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--line); }
+  #lista li { display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--line); }
+  #lista .azioni { display:flex; gap:6px; }
+  .voci { flex:1 0 100%; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:8px 10px; }
+  .voce { display:grid; grid-template-columns:minmax(80px,1fr) auto minmax(60px,1fr) 3.4em auto; gap:8px; align-items:center; padding:4px 0; }
+  .voce .pers { font-weight:600; font-size:13px; overflow-wrap:anywhere; }
+  .voce input[type=range] { width:100%; min-width:0; }
+  .voce .vel { color:var(--muted); font-size:13px; }
+  .voci .fine { display:flex; gap:8px; justify-content:flex-end; margin-top:8px; }
+  .voci .nota { color:var(--muted); font-size:13px; margin:6px 0 0; }
   #lista .t { font-weight:600; }
   #lista .s { color:var(--muted); font-size:13px; }
   #lista .nessuno { color:var(--muted); font-style:italic; justify-content:flex-start; }
@@ -159,15 +167,105 @@ function disegnaPannello(d) {
     const s = document.createElement('div'); s.className = 's';
     s.textContent = `${o.personaggi.length} personaggi · ${o.battute} battute · ${o.mb} MB`;
     info.append(t, s);
+    const voci = document.createElement('button');
+    voci.textContent = 'Voci';
+    voci.onclick = () => apriVoci(o, li);
     const b = document.createElement('button');
     b.className = 'pericolo'; b.textContent = 'Elimina';
     b.onclick = () => elimina(o);
-    li.append(info, b);
+    const azioni = document.createElement('div');
+    azioni.className = 'azioni';
+    azioni.append(voci, b);
+    li.append(info, azioni);
     ul.appendChild(li);
   });
   const pieno = d.opere.length >= d.max;
   $('file').disabled = $('aggiungi').disabled = pieno || occupato || !!d.in_corso;
   if (pieno && !occupato && !$('stato').textContent) stato(`Hai già ${d.max} copioni: eliminane uno per aggiungerne un altro.`);
+}
+
+// ---------- scelta delle voci
+const velocita = v => Number(v).toFixed(2) + '×';
+
+async function apriVoci(o, li) {
+  const aperto = li.querySelector('.voci');
+  if (aperto) { aperto.remove(); return; }
+  const r = await fetch('api/opere/' + encodeURIComponent(o.nome) + '/cast');
+  const d = await r.json();
+  if (!r.ok) return stato(d.errore, true);
+
+  const box = document.createElement('div');
+  box.className = 'voci';
+  const scelte = [];
+  d.personaggi.forEach(p => {
+    const c = d.cast[p];
+    const riga = document.createElement('div');
+    riga.className = 'voce';
+    const chi = document.createElement('span'); chi.className = 'pers'; chi.textContent = p;
+    const sel = document.createElement('select');
+    for (const [id, et] of Object.entries(d.voci)) sel.add(new Option(et, id));
+    sel.value = c.voce;
+    const vel = document.createElement('input');
+    vel.type = 'range'; vel.min = d.speed[0]; vel.max = d.speed[1]; vel.step = 0.05; vel.value = c.speed;
+    vel.title = 'Velocità';
+    const lab = document.createElement('span'); lab.className = 'vel'; lab.textContent = velocita(vel.value);
+    vel.oninput = () => { lab.textContent = velocita(vel.value); };
+    const ascolta = document.createElement('button');
+    ascolta.textContent = '▶'; ascolta.title = 'Ascolta questa voce';
+    ascolta.onclick = () => anteprima(sel.value, vel.value, ascolta);
+    riga.append(chi, sel, vel, lab, ascolta);
+    box.appendChild(riga);
+    scelte.push([p, sel, vel]);
+  });
+  const nota = document.createElement('p');
+  nota.className = 'nota';
+  nota.textContent = 'Cambiando le voci vengono rigenerate solo le battute dei personaggi modificati.';
+  const fine = document.createElement('div');
+  fine.className = 'fine';
+  const annulla = document.createElement('button'); annulla.textContent = 'Annulla';
+  annulla.onclick = () => box.remove();
+  const applica = document.createElement('button'); applica.className = 'primary'; applica.textContent = 'Applica';
+  applica.onclick = () => applicaVoci(o, scelte);
+  fine.append(annulla, applica);
+  box.append(nota, fine);
+  li.appendChild(box);
+}
+
+let provaAudio = null;
+async function anteprima(voce, speed, btn) {
+  if (provaAudio) provaAudio.pause();
+  btn.disabled = true; btn.textContent = '…';
+  try {
+    const r = await fetch(`api/anteprima?voce=${encodeURIComponent(voce)}&speed=${encodeURIComponent(speed)}`);
+    const j = await r.json();
+    if (!r.ok) return stato(j.errore, true);
+    provaAudio = new Audio('audio/' + j.audio);
+    await provaAudio.play();
+  } catch (e) {
+    stato('Non riesco a riprodurre la prova: ' + e.message, true);
+  } finally {
+    btn.disabled = false; btn.textContent = '▶';
+  }
+}
+
+async function applicaVoci(o, scelte) {
+  const cast = {};
+  scelte.forEach(([p, sel, vel]) => { cast[p] = { voce: sel.value, speed: Number(vel.value) }; });
+  occupato = true; $('file').disabled = $('aggiungi').disabled = true;
+  stato('Applico le voci…');
+  try {
+    const r = await fetch(`api/opere/${encodeURIComponent(o.nome)}/cast`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cast),
+    });
+    const j = await r.json();
+    if (!r.ok) { stato(j.errore, true); return; }
+    await seguiJob(j.job, 'Voci aggiornate.');
+  } catch (e) {
+    stato('Errore di rete: ' + e.message, true);
+  } finally {
+    occupato = false;
+    await sincronizza();
+  }
 }
 
 async function elimina(o) {
@@ -196,7 +294,7 @@ async function aggiungi() {
   }
 }
 
-async function seguiJob(job) {
+async function seguiJob(job, fine = 'Fatto! Copione aggiunto: puoi cambiare le voci da «Voci».') {
   occupato = true;
   const p = $('prog');
   p.hidden = false;
@@ -205,7 +303,7 @@ async function seguiJob(job) {
       const st = await (await fetch('api/jobs/' + job)).json();
       p.max = st.totale || 1; p.value = st.fatte;
       if (st.stato === 'finito') {
-        stato('Fatto! Copione aggiunto.');
+        stato(fine);
         $('file').value = '';
         await sincronizza(st.nome);
         return;

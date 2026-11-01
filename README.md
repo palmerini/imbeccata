@@ -23,6 +23,9 @@ Non c'è nessun login: l'app è pensata per un attore che carica il copione di v
 
 - **Limite**: al massimo 3 copioni insieme, per limitare lo spazio su disco
   (modificabile con la variabile d'ambiente `IMBECCATA_MAX_COPIONI`).
+- Il pulsante **Voci** di ogni copione permette di scegliere, per ogni personaggio, la voce e la
+  velocità (con un pulsante ▶ per ascoltare una prova). Applicando si rigenerano solo le battute
+  dei personaggi modificati.
 - Eliminando un copione si cancellano anche le sue clip audio, a meno che le usi un altro copione.
 - Il nome del copione è quello del file; se ne esiste già uno con lo stesso nome va eliminato prima.
 - Il server ascolta solo su `127.0.0.1`.
@@ -45,8 +48,12 @@ Al primo avvio Kokoro scarica il modello (circa 300 MB) da Hugging Face.
 ## Uso
 
 ```bash
-.venv/bin/python -I src/server.py     # poi apri http://localhost:8766 (porta opzionale: src/server.py 9000)
+./avvia.sh            # avvia il server e apre http://localhost:8766 (porta opzionale: ./avvia.sh 9000)
 ```
+
+Se l'app è già in esecuzione, lo script apre solo il browser. `NO_BROWSER=1 ./avvia.sh` non apre il browser.
+Al primo avvio, se manca `.venv`, lo script propone di crearlo e di installare le dipendenze
+(servono alcuni GB di spazio). Equivale a lanciare a mano `.venv/bin/python -I src/server.py`.
 
 Da riga di comando (stessa logica e stesso limite del pannello):
 
@@ -79,8 +86,8 @@ PERSONAGGIO: battuta, anche (con didascalia inline) che non viene letta.
 Ogni copione ha un `cast.json` (in `web/opere/<nome>/`) che assegna a ogni personaggio
 motore, voce e velocità. Con il caricamento dal player viene creato in automatico, alternando
 le due voci italiane di Kokoro (`if_sara` femminile, `im_nicola` maschile) senza conoscere il
-genere dei personaggi. Da riga di comando si può passare un cast scritto a mano
-(`testi/<nome>.cast.json`, vedi `testi/esempio.cast.json`).
+genere dei personaggi: si corregge dal pulsante **Voci**. Da riga di comando si può passare
+un cast scritto a mano (`testi/<nome>.cast.json`, vedi `testi/esempio.cast.json`).
 
 ## Licenza
 
@@ -89,7 +96,6 @@ hanno licenze proprie: controllale prima di distribuire l'audio generato.
 
 ## Da fare
 
-- Scelta delle voci per personaggio dal player (ora è automatica).
 - Riconoscimento vocale per la pausa dell'attore.
 - Motori TTS aggiuntivi / a pagamento.
 - App mobile e pacchetti audio offline.
