@@ -1,0 +1,14 @@
+# Il caffè del mattino
+
+## Scena 1
+(Una cucina. Maria versa il caffè, Giorgio entra assonnato.)
+MARIA: Buongiorno! Hai dormito bene, stanotte?
+GIORGIO: (sbadigliando) Non ne parliamo. Il vicino ha suonato la tromba fino alle tre.
+MARIA: La tromba? Ma se non sa nemmeno suonare.
+GIORGIO: Appunto. Ha ripetuto la stessa nota per ore, convinto di essere
+    un grande artista.
+MARIA: Ti porto un caffè. Bello forte, ne hai bisogno.
+(Maria gli porge la tazza.)
+GIORGIO: Grazie. Se continua così, stasera vado a suonargli io il campanello.
+MARIA: E poi?
+GIORGIO: E poi scappo.

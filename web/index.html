@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Imbeccata</title>
+<style>
+  :root { --bg:#faf8f4; --fg:#222; --muted:#888; --accent:#a4361f; --card:#fff; --line:#e6e0d6; --mine:#fbeee9; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#1b1a18; --fg:#eee; --muted:#999; --accent:#e8785f; --card:#262421; --line:#3a3733; --mine:#3a2520; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:17px/1.5 Georgia, serif; background:var(--bg); color:var(--fg); }
+  header { position:sticky; top:0; background:var(--bg); border-bottom:1px solid var(--line); padding:10px 16px; z-index:2; }
+  h1 { font-size:18px; margin:0 0 8px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; font:14px system-ui, sans-serif; }
+  select, button { font:inherit; padding:6px 10px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--fg); }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  main { max-width:720px; margin:0 auto; padding:12px 16px 120px; }
+  .scena { font:600 13px system-ui, sans-serif; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin:24px 0 6px; }
+  .dida { color:var(--muted); font-style:italic; margin:8px 0; }
+  .battuta { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:8px 12px; margin:8px 0; cursor:pointer; }
+  .battuta .chi { font:600 12px system-ui, sans-serif; color:var(--muted); letter-spacing:.05em; }
+  .battuta.mia { background:var(--mine); border-color:var(--accent); }
+  .battuta.attiva { outline:2px solid var(--accent); }
+  .nascosto { filter:blur(7px); user-select:none; }
+  #aiuto { position:fixed; bottom:0; left:0; right:0; background:var(--bg); border-top:1px solid var(--line); padding:12px 16px; text-align:center; font:15px system-ui, sans-serif; }
+  #aiuto button { font-size:17px; padding:10px 24px; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="titolo">Prova battute</h1>
+  <div class="row">
+    <label>Opera <select id="opera"></select></label>
+    <label>Io sono <select id="io"></select></label>
+    <label>Il mio testo
+      <select id="modo">
+        <option value="visibile">visibile</option>
+        <option value="nascosto">nascosto (sfocato)</option>
+        <option value="imbeccata">solo imbeccata (ultime parole degli altri)</option>
+      </select>
+    </label>
+    <label>Pausa mia
+      <select id="pausa">
+        <option value="tap">tap per proseguire</option>
+        <option value="auto">automatica</option>
+      </select>
+    </label>
+    <button class="primary" id="play">▶ Inizia da qui</button>
+    <button id="stop">■ Stop</button>
+  </div>
+</header>
+<main id="testo"></main>
+<div id="aiuto" hidden>
+  <div id="msg">Tocca la tua battuta</div>
+  <button class="primary" id="avanti">Fatto, avanti →</button>
+  <button id="suggerisci">Suggerimento</button>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let opera = null, nome = null, idx = 0, running = false, token = 0;
+const audio = new Audio();
+
+async function init() {
+  const lista = await (await fetch('opere/index.json')).json();
+  $('opera').innerHTML = lista.map(n => `<option>${n}</option>`).join('');
+  $('opera').onchange = () => carica($('opera').value);
+  await carica(lista[0]);
+}
+
+async function carica(n) {
+  stop();
+  nome = n;
+  opera = await (await fetch(`opere/${n}/opera.json`)).json();
+  $('titolo').textContent = opera.titolo || n;
+  $('io').innerHTML = opera.personaggi.map(p => `<option>${p}</option>`).join('');
+  $('io').onchange = disegna;
+  $('modo').onchange = disegna;
+  disegna();
+}
+
+function disegna() {
+  const io = $('io').value, modo = $('modo').value;
+  $('testo').innerHTML = '';
+  opera.righe.forEach((r, i) => {
+    const d = document.createElement('div');
+    d.id = 'r' + i;
+    if (r.tipo === 'scena') { d.className = 'scena'; d.textContent = r.testo; }
+    else if (r.tipo === 'didascalia') { d.className = 'dida'; d.textContent = r.testo; }
+    else {
+      const mia = (r.parlanti || [r.personaggio]).includes(io);
+      d.className = 'battuta' + (mia ? ' mia' : '');
+      d.innerHTML = `<div class="chi"></div><div class="t"></div>`;
+      d.querySelector('.chi').textContent = (r.parlanti || [r.personaggio]).join(' + ');
+      d.querySelector('.t').textContent = (!mia && modo === 'imbeccata') ? imbeccata(r.testo) : r.testo;
+      if (mia && modo !== 'visibile') d.querySelector('.t').classList.add('nascosto');
+      d.onclick = () => { idx = i; segna(i); };
+    }
+    $('testo').appendChild(d);
+  });
+}
+
+// ultime parole di una battuta: l'attacco per chi deve rispondere
+function imbeccata(testo) {
+  const parole = testo.replace(/\([^)]*\)/g, ' ').split(/\s+/).filter(Boolean);
+  return parole.length <= 5 ? parole.join(' ') : '… ' + parole.slice(-5).join(' ');
+}
+
+function segna(i) {
+  document.querySelectorAll('.attiva').forEach(e => e.classList.remove('attiva'));
+  const e = $('r' + i);
+  if (e) { e.classList.add('attiva'); e.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function suonaClip(file) {
+  return new Promise(res => {
+    audio.src = `opere/${nome}/audio/${file}`;
+    audio.onended = audio.onerror = res;
+    audio.play().catch(res);
+  });
+}
+
+function attendiTap(my) {
+  return new Promise(res => {
+    $('aiuto').hidden = false;
+    $('msg').textContent = 'Tocca a te: ' + my.personaggio;
+    $('avanti').onclick = () => { $('aiuto').hidden = true; res(); };
+    $('suggerisci').onclick = () => $('r' + my.id).querySelector('.t').classList.remove('nascosto');
+    stopWait = () => { $('aiuto').hidden = true; res(); };
+  });
+}
+let stopWait = () => {};
+
+async function run() {
+  const mio = ++token;
+  running = true;
+  $('play').disabled = true;
+  const io = $('io').value;
+  for (; idx < opera.righe.length && mio === token; idx++) {
+    const r = opera.righe[idx];
+    if (r.tipo !== 'battuta') continue;
+    segna(idx);
+    if ((r.parlanti || [r.personaggio]).includes(io)) {
+      const nasc = document.querySelector(`#r${idx} .t`);
+      if ($('pausa').value === 'auto') await sleep(Math.max(1500, (r.durata || 2) * 1300));
+      else await attendiTap(r);
+      if (nasc && $('modo').value !== 'visibile') nasc.classList.add('nascosto');
+    } else if (r.audio) {
+      await suonaClip(r.audio);
+      await sleep(350);
+    } else {
+      await sleep(900); // solo didascalia, niente da leggere
+    }
+  }
+  if (mio === token) { running = false; idx = 0; }
+  $('play').disabled = false;
+}
+
+function stop() {
+  token++; audio.pause(); stopWait(); running = false; $('aiuto').hidden = true; $('play').disabled = false;
+}
+
+$('play').onclick = run;
+$('stop').onclick = stop;
+init();
+</script>
+</body>
+</html>

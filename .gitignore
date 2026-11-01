@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+.DS_Store
+
+# audio generato (si rigenera con src/build.py)
+cache/
+web/opere/
+
+# copioni reali: repository pubblico, restano in locale
+testi/*.pdf
+testi/llm.txt
+testi/llm.cast.json
+testi/ultima_voce.txt
+testi/ultima_voce.cast.json
