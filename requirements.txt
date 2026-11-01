@@ -1,0 +1,6 @@
+kokoro==0.9.4
+misaki[en]==0.9.4
+espeakng-loader==0.2.4
+phonemizer-fork==3.3.2
+soundfile==0.14.0
+numpy==2.5.4
