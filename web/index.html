@@ -61,6 +61,7 @@
   <div class="row">
     <label>Opera <select id="opera"></select></label>
     <label>Io sono <select id="io"></select></label>
+    <label id="lblscena" hidden>Scena <select id="scena"></select></label>
     <label>Il mio testo
       <select id="modo">
         <option value="visibile">visibile</option>
@@ -337,6 +338,12 @@ async function carica(n) {
   $('titolo').textContent = opera.titolo || n;
   $('io').innerHTML = opera.personaggi.map(p => `<option>${p}</option>`).join('');
   $('io').onchange = disegna;
+  const scene = opera.righe.map((r, i) => [r, i]).filter(([r]) => r.tipo === 'scena');
+  $('scena').replaceChildren(new Option('Tutto il copione', ''),
+    ...scene.map(([r, i]) => new Option(r.testo, i)));
+  $('lblscena').hidden = scene.length === 0;
+  $('scena').onchange = scegliScena;
+  idx = 0;
   $('modo').onchange = disegna;
   disegna();
 }
@@ -356,10 +363,41 @@ function disegna() {
       d.querySelector('.chi').textContent = (r.parlanti || [r.personaggio]).join(' + ');
       d.querySelector('.t').textContent = (!mia && modo === 'imbeccata') ? imbeccata(r.testo) : r.testo;
       if (mia && modo !== 'visibile') d.querySelector('.t').classList.add('nascosto');
-      d.onclick = () => { idx = i; segna(i); };
+      d.onclick = () => {
+        stop();
+        if ($('scena').value !== '') {
+          // se la battuta è fuori dalla scena scelta, passa alla scena che la contiene
+          const [a, b] = intervallo();
+          if (i < a || i >= b) $('scena').value = String(inizioScena(i));
+        }
+        idx = i; segna(i);
+      };
     }
     $('testo').appendChild(d);
   });
+}
+
+// [inizio, fine) delle righe da riprodurre: tutto il copione o la scena scelta
+function intervallo() {
+  const v = $('scena').value;
+  if (v === '') return [0, opera.righe.length];
+  const a = Number(v);
+  let b = a + 1;
+  while (b < opera.righe.length && opera.righe[b].tipo !== 'scena') b++;
+  return [a, b];
+}
+
+// indice della riga-scena che contiene la riga i ('' se prima della prima scena)
+function inizioScena(i) {
+  for (let k = i; k >= 0; k--) if (opera.righe[k].tipo === 'scena') return k;
+  return '';
+}
+
+function scegliScena() {
+  stop();
+  idx = intervallo()[0];
+  const e = $('r' + idx);
+  if (e) e.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 
 // ultime parole di una battuta: l'attacco per chi deve rispondere
@@ -401,7 +439,9 @@ async function run() {
   running = true;
   $('play').disabled = true;
   const io = $('io').value;
-  for (; idx < opera.righe.length && mio === token; idx++) {
+  const [inizio, fine] = intervallo();
+  if (idx < inizio || idx >= fine) idx = inizio;
+  for (; idx < fine && mio === token; idx++) {
     const r = opera.righe[idx];
     if (r.tipo !== 'battuta') continue;
     segna(idx);
@@ -417,7 +457,7 @@ async function run() {
       await sleep(900); // solo didascalia, niente da leggere
     }
   }
-  if (mio === token) { running = false; idx = 0; }
+  if (mio === token) { running = false; idx = intervallo()[0]; }
   $('play').disabled = false;
 }
 
