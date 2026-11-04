@@ -67,9 +67,16 @@ Per convertire un copione PDF nel formato del progetto, senza generare audio:
 .venv/bin/python -I src/pdf2txt.py copione.pdf testi/copione.txt
 ```
 
-Il convertitore si aspetta un PDF con sezione PERSONAGGI e battute del tipo
-`NOME <spazio zero-width> testo` (vedi i commenti in `src/pdf2txt.py`).
-Per altri impaginati va adattato, oppure si scrive direttamente il testo nel formato sotto.
+Il convertitore riconosce da solo due impaginazioni (vedi i commenti in `src/pdf2txt.py`):
+
+1. battute del tipo `NOME <spazio zero-width> testo`, con righe rientrate di continuazione;
+2. battute `NOME: testo` (o `NOME (didascalia)` su una riga e testo sotto), con didascalie come
+   paragrafi liberi e righe lunghe spezzate senza rientro. Qui la separazione fra parlato e
+   didascalie si basa su euristiche: conviene rileggere il `.txt` generato e correggerlo a mano
+   (ad esempio un discorso in più paragrafi separati da righe vuote può essere scambiato per
+   didascalie). Per usare la versione corretta, carica il `.txt` invece del PDF.
+
+Per altri impaginati il convertitore va adattato, oppure si scrive direttamente il testo nel formato sotto.
 
 ## Formato del testo
 
@@ -88,6 +95,42 @@ motore, voce e velocità. Con il caricamento dal player viene creato in automati
 le due voci italiane di Kokoro (`if_sara` femminile, `im_nicola` maschile) senza conoscere il
 genere dei personaggi: si corregge dal pulsante **Voci**. Da riga di comando si può passare
 un cast scritto a mano (`testi/<nome>.cast.json`, vedi `testi/esempio.cast.json`).
+
+## Pubblicazione online (sola lettura)
+
+Per mettere online un copione **già generato**, senza server e senza possibilità di generare
+nuovi audio, si esporta un sito statico e lo si pubblica su Cloudflare (Workers con asset statici).
+Il sito esportato contiene solo il player, il testo del copione e le clip MP3; non ha il pannello
+Copioni né Voci. Il sito è in `dist/` (ignorato da git: contiene l'audio dei copioni reali).
+
+1. **Esporta** (serve `ffmpeg`; le clip diventano MP3 a 64 kbps, circa un sesto del peso):
+
+   ```bash
+   .venv/bin/python -I src/esporta.py nome_copione      # senza nome esporta tutti i copioni
+   ```
+
+   Per un copione di circa 320 battute: 327 file, circa 21 MB (il limite di Cloudflare è
+   20.000 file, 25 MiB ciascuno). Prova in locale: `python3 -m http.server 8767 --directory dist`.
+
+2. **Pubblica** (serve Node; il primo comando apre il browser per autorizzare il tuo account Cloudflare):
+
+   ```bash
+   npx wrangler login
+   npx wrangler deploy
+   ```
+
+   Il sito risponde su `https://imbeccata.<tuo-sottodominio>.workers.dev` (configurazione in `wrangler.jsonc`).
+
+3. **Proteggilo subito con Cloudflare Access**, perché il sito non ha un login suo e fino a
+   quel momento è raggiungibile da chiunque conosca l'indirizzo. Dal pannello Cloudflare:
+   Workers & Pages → `imbeccata` → Settings → Domains & Routes → `workers.dev` → abilita
+   Cloudflare Access (includendo anche i preview URL). Poi in Zero Trust → Access → Applications
+   apri l'applicazione creata e imposta una policy *Allow* con regola *Emails* e l'elenco degli
+   invitati; come metodo di accesso basta *One-time PIN* (codice via email, gratis fino a 50 utenti).
+   I nomi dei menu possono cambiare.
+
+4. **Invitare qualcuno** = aggiungere la sua email alla policy. **Aggiornare il copione** = rifare
+   i passi 1 e 2.
 
 ## Licenza
 

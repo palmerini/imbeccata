@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Imbeccata</title>
+<meta name="robots" content="noindex, nofollow">
 <style>
   :root { --bg:#faf8f4; --fg:#222; --muted:#888; --accent:#a4361f; --card:#fff; --line:#e6e0d6; --mine:#fbeee9; }
   @media (prefers-color-scheme: dark) {
@@ -112,6 +113,9 @@ MARIA/GIORGIO: Una battuta detta insieme.</pre>
 
 <script>
 const $ = id => document.getElementById(id);
+// Sola lettura: src/esporta.py cambia questo valore in true. In quella modalità il sito non ha
+// server: legge opere/index.json e le clip già pronte, senza pannello Copioni né Voci.
+const STATICO = false;
 let opera = null, nome = null, idx = 0, running = false, token = 0;
 const audio = new Audio();
 
@@ -119,11 +123,11 @@ let elenco = [], occupato = false;
 
 // Allinea menu e pannello all'elenco sul server; `scegli` = copione da aprire.
 async function sincronizza(scegli) {
-  const d = await (await fetch('api/opere')).json();
+  const d = await (await fetch(STATICO ? 'opere/index.json' : 'api/opere')).json();
   elenco = d.opere;
   const corrente = scegli || $('opera').value;
   $('opera').replaceChildren(...elenco.map(o => new Option(o.titolo, o.nome)));
-  disegnaPannello(d);
+  if (!STATICO) disegnaPannello(d);
   if (!elenco.length) {
     stop(); opera = null; nome = null;
     $('titolo').textContent = 'Imbeccata';
@@ -139,6 +143,13 @@ async function sincronizza(scegli) {
 
 async function init() {
   $('opera').onchange = () => carica($('opera').value);
+  if (STATICO) {
+    $('copioni').hidden = true;
+    $('dlg').remove();
+    await sincronizza();
+    $('opera').closest('label').hidden = elenco.length < 2;  // un solo copione: niente menu
+    return;
+  }
   const d = await sincronizza();
   if (d.in_corso) { $('dlg').showModal(); seguiJob(d.in_corso.job); }
   else if (!elenco.length) $('dlg').showModal();
@@ -416,9 +427,11 @@ function stop() {
 
 $('play').onclick = run;
 $('stop').onclick = stop;
-$('copioni').onclick = () => { stato(''); $('dlg').showModal(); sincronizza(); };
-$('chiudi').onclick = () => $('dlg').close();
-$('aggiungi').onclick = aggiungi;
+if (!STATICO) {
+  $('copioni').onclick = () => { stato(''); $('dlg').showModal(); sincronizza(); };
+  $('chiudi').onclick = () => $('dlg').close();
+  $('aggiungi').onclick = aggiungi;
+}
 init();
 </script>
 </body>

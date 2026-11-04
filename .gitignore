@@ -2,13 +2,13 @@
 __pycache__/
 .DS_Store
 
-# audio generato (si rigenera con src/build.py)
+# audio generato (si rigenera con src/build.py) e sito esportato (contiene l'audio dei copioni reali)
 cache/
 web/opere/
+dist/
+.wrangler/
 
-# copioni reali: repository pubblico, restano in locale
-testi/*.pdf
-testi/llm.txt
-testi/llm.cast.json
-testi/ultima_voce.txt
-testi/ultima_voce.cast.json
+# copioni reali: repository pubblico, restano in locale (solo l'esempio è pubblicato)
+testi/*
+!testi/esempio.txt
+!testi/esempio.cast.json

@@ -1,0 +1,6 @@
+{
+  // Sito statico di sola lettura: vedi README ("Pubblicazione online")
+  "name": "imbeccata",
+  "compatibility_date": "2026-11-01",
+  "assets": { "directory": "./dist" }
+}
