@@ -91,7 +91,7 @@
   <h2>I tuoi copioni <small id="contatore"></small></h2>
   <ul id="lista"></ul>
   <div id="carica">
-    <input type="file" id="file" accept=".txt,.pdf,text/plain,application/pdf">
+    <input type="file" id="file" accept=".txt,.pdf,.fountain,text/plain,application/pdf">
     <button class="primary" id="aggiungi">Aggiungi</button>
   </div>
   <progress id="prog" hidden></progress>
@@ -290,7 +290,7 @@ async function elimina(o) {
 
 async function aggiungi() {
   const f = $('file').files[0];
-  if (!f) return stato('Scegli prima un file .txt o .pdf.', true);
+  if (!f) return stato('Scegli prima un file .txt, .pdf o .fountain.', true);
   occupato = true; $('file').disabled = $('aggiungi').disabled = true;
   stato('Carico il file…');
   try {

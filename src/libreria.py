@@ -16,6 +16,7 @@ import unicodedata
 from pathlib import Path
 
 from copione import parse
+from fountain2txt import converti as converti_fountain
 from pdf2txt import converti
 from tts import ClipCache
 
@@ -69,7 +70,7 @@ def elenca() -> list[dict]:
 
 
 def da_file(nome_file: str, dati: bytes) -> tuple[str, dict]:
-    """Da un file caricato (.txt o .pdf) ricava (testo nel formato del progetto, copione parsato)."""
+    """Da un file caricato (.txt, .pdf o .fountain) ricava (testo nel formato del progetto, copione parsato)."""
     if len(dati) > MAX_BYTES:
         raise ErroreCopione(f"File troppo grande (massimo {MAX_BYTES // 2**20} MB).", 413)
 
@@ -98,6 +99,11 @@ def da_file(nome_file: str, dati: bytes) -> tuple[str, dict]:
                 break
             except UnicodeDecodeError:
                 continue
+        if nome_file.lower().endswith(".fountain"):
+            try:
+                testo = converti_fountain(testo)
+            except Exception:
+                raise ErroreCopione("Non riesco a leggere questo file Fountain.")
 
     opera = parse(testo)
     if not any(r["tipo"] == "battuta" and r["testo_tts"] for r in opera["righe"]):
@@ -191,10 +197,12 @@ def leggi_cast(nome: str) -> dict:
     f = OPERE_DIR / nome / "cast.json"
     if f.exists():
         cast.update(_leggi(f))
+    extra = {c["voce"]: f'{c["voce"].split("-")[-1]} ({c["engine"]})'
+             for c in cast.values() if c["engine"] != "kokoro"}
     return {
         "personaggi": opera["personaggi"],
         "cast": {p: cast[p] for p in opera["personaggi"]},
-        "voci": VOCI,
+        "voci": {**VOCI, **extra},
         "speed": [SPEED_MIN, SPEED_MAX],
     }
 
@@ -204,12 +212,17 @@ def prepara_cast(nome: str, grezzo) -> tuple[dict, int]:
     opera = _opera(nome)
     if not isinstance(grezzo, dict):
         raise ErroreCopione("Cast non valido.")
+    # voci di altri motori sono ammesse solo se già nel cast del copione (il pannello offre solo Kokoro)
+    f = OPERE_DIR / nome / "cast.json"
+    attuale = _leggi(f) if f.exists() else {}
+    motori = {c["voce"]: c["engine"] for c in attuale.values() if c.get("engine") != "kokoro"}
     cast = {}
     for p in opera["personaggi"]:
         c = grezzo.get(p)
-        if not isinstance(c, dict) or c.get("voce") not in VOCI:
+        if not isinstance(c, dict) or (c.get("voce") not in VOCI and c.get("voce") not in motori):
             raise ErroreCopione(f"Voce non valida per {p}.")
-        cast[p] = {"engine": "kokoro", "voce": c["voce"], "speed": _speed(c.get("speed", 1.0))}
+        cast[p] = {"engine": "kokoro" if c["voce"] in VOCI else motori[c["voce"]],
+                   "voce": c["voce"], "speed": _speed(c.get("speed", 1.0))}
     return cast, n_clip(opera)
 
 

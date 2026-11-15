@@ -18,6 +18,8 @@ import re
 import sys
 from dataclasses import dataclass, asdict
 
+from normalizza import normalizza
+
 RE_BATTUTA = re.compile(r"^([A-ZÀ-ÖØ-Ý][A-ZÀ-ÖØ-Ý0-9 '.\-/]{0,80}):\s*(.*)$")
 RE_SCENA = re.compile(r"^##\s+(.*)$")
 RE_TITOLO = re.compile(r"^#\s+(.*)$")
@@ -73,14 +75,14 @@ def parse(text: str) -> dict:
             chiudi()
             righe.append(Riga(len(righe), "didascalia", None, s, "", scena))
 
+    personaggi = sorted({p for r in righe if r.parlanti for p in r.parlanti})
     for r in righe:
         if r.tipo == "battuta":
             t = RE_INLINE_DIDA.sub(" ", r.testo)
-            t = re.sub(r"\s+", " ", t).strip()
+            t = normalizza(re.sub(r"\s+", " ", t).strip(), personaggi)
             # niente da leggere se resta solo punteggiatura (es. "…")
             r.testo_tts = t if re.search(r"\w", t) else ""
 
-    personaggi = sorted({p for r in righe if r.parlanti for p in r.parlanti})
     return {"titolo": titolo, "personaggi": personaggi, "righe": [asdict(r) for r in righe]}
 
 

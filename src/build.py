@@ -3,7 +3,7 @@
 Uso:
     python -I src/build.py testi/esempio.txt [--cast testi/esempio.cast.json]
 
-Accetta .txt (formato del progetto) o .pdf. Se il file cast non esiste viene
+Accetta .txt (formato del progetto), .pdf o .fountain. Se il file cast non esiste viene
 creato con voci assegnate in automatico (da modificare a mano). Vale il limite
 di copioni di libreria.MAX_COPIONI; per sostituire un copione con lo stesso
 nome basta rilanciare il comando (le clip già generate vengono riusate).
@@ -15,6 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import libreria as lib  # noqa: E402
+from tts import GoogleChirpEngine  # noqa: E402
 
 
 def main():
@@ -29,6 +30,17 @@ def main():
         cast_path = Path(args.cast) if args.cast else src.with_suffix(".cast.json")
         cast = json.loads(cast_path.read_text(encoding="utf-8")) if cast_path.exists() else None
         totale = lib.n_clip(opera)
+        voci_google = {c["voce"] for c in (cast or {}).values() if c["engine"] == "google-chirp3-hd"}
+        if voci_google:
+            try:
+                mancano = sorted(voci_google - {n for n, _ in GoogleChirpEngine().voci()})
+            except RuntimeError as e:
+                sys.exit(f"Errore: {e}")
+            if mancano:
+                sys.exit(f"Errore: voci Google non disponibili per l'italiano: {', '.join(mancano)}")
+        mancanti = [p for p in opera["personaggi"] if cast is not None and p not in cast]
+        if mancanti:
+            sys.exit(f"Errore: personaggi senza voce nel cast: {', '.join(mancanti)}")
         cast = lib.genera(
             lib.slugify(src.stem), testo, opera, cast,
             progresso=lambda i, t: print(f"\r[{i}/{t}]", end="", flush=True),

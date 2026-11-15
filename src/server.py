@@ -5,7 +5,7 @@ Uso:
 
 API:
     GET    /api/opere          -> {max, opere: [...], in_corso}
-    POST   /api/opere          -> corpo = file .txt/.pdf, header X-Nome = nome del file (url-encoded)
+    POST   /api/opere          -> corpo = file .txt/.pdf/.fountain, header X-Nome = nome del file (url-encoded)
     GET    /api/jobs/<id>      -> avanzamento della generazione audio
     DELETE /api/opere/<nome>   -> elimina il copione e le clip non più usate
     GET    /api/opere/<nome>/cast  -> voci attuali + voci disponibili

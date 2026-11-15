@@ -17,7 +17,7 @@ con voce sintetica tutti i personaggi tranne quello dell'attore, che parla nei v
 
 ## Gestire i copioni
 
-Dal pulsante **Copioni…** del player l'utente carica un file `.txt` o `.pdf`, vede
+Dal pulsante **Copioni…** del player l'utente carica un file `.txt`, `.pdf` o `.fountain`, vede
 l'avanzamento della generazione audio ed elimina i copioni che non gli servono più.
 Non c'è nessun login: l'app è pensata per un attore che carica il copione di volta in volta.
 
@@ -58,7 +58,7 @@ Al primo avvio, se manca `.venv`, lo script propone di crearlo e di installare l
 Da riga di comando (stessa logica e stesso limite del pannello):
 
 ```bash
-.venv/bin/python -I src/build.py testi/esempio.txt   # accetta .txt o .pdf
+.venv/bin/python -I src/build.py testi/esempio.txt   # accetta .txt, .pdf o .fountain
 ```
 
 Per convertire un copione PDF nel formato del progetto, senza generare audio:
@@ -78,6 +78,18 @@ Il convertitore riconosce da solo due impaginazioni (vedi i commenti in `src/pdf
 
 Per altri impaginati il convertitore va adattato, oppure si scrive direttamente il testo nel formato sotto.
 
+I copioni in formato [Fountain](https://fountain.io) (`.fountain`) si caricano come i `.txt`; per
+convertirli senza generare audio:
+
+```bash
+.venv/bin/python -I src/fountain2txt.py copione.fountain testi/copione.txt
+```
+
+Le battute sono i nomi in maiuscolo (`NOME`, anche `A E B` per le battute corali), le didascalie sono
+i paragrafi di azione, `.SCENA ...` è una scena (unita alla sezione `# ATTO ...` che la precede).
+Un paragrafo staccato da una riga vuota dalla battuta precedente è una didascalia anche se è la
+continuazione di un discorso: se serve, correggi il `.txt` generato.
+
 ## Formato del testo
 
 ```
@@ -87,6 +99,16 @@ Per altri impaginati il convertitore va adattato, oppure si scrive direttamente 
 PERSONAGGIO: battuta, anche (con didascalia inline) che non viene letta.
     Righe rientrate = continuazione della battuta.
 ```
+
+### Testo letto dal TTS
+
+Prima della sintesi (`src/normalizza.py`) il testo di ogni battuta viene normalizzato: numeri,
+ordinali e percentuali in lettere (`1977`, `39º`, `78%`), nomi dei personaggi in maiuscolo in forma
+normale (`OLIVIERO` -> `Oliviero`), apostrofi e virgolette tipografiche semplificati, puntini di
+sospensione ridotti a `...` (mai a inizio battuta), trattini usati come incisi resi con virgole.
+A schermo il testo resta quello scritto. Le parole urlate in maiuscolo che non sono nomi restano
+com'erano. Se cambia una regola, le battute modificate hanno una nuova chiave di cache e vengono
+rigenerate.
 
 ## Cast
 
@@ -103,13 +125,19 @@ nuovi audio, si esporta un sito statico e lo si pubblica su Cloudflare (Workers 
 Il sito esportato contiene solo il player, il testo del copione e le clip MP3; non ha il pannello
 Copioni né Voci. Il sito è in `dist/` (ignorato da git: contiene l'audio dei copioni reali).
 
-1. **Esporta** (serve `ffmpeg`; le clip diventano MP3 a 64 kbps, circa un sesto del peso):
+1. **Esporta** (serve `ffmpeg`; le clip diventano MP3 mono a 96 kbps, circa un quarto del peso dei WAV; `--bitrate 64k` per file più piccoli):
 
    ```bash
    .venv/bin/python -I src/esporta.py nome_copione      # senza nome esporta tutti i copioni
    ```
 
-   Per un copione di circa 320 battute: 327 file, circa 21 MB (il limite di Cloudflare è
+   Ogni clip viene anche portata allo stesso volume medio del parlato (default -20 dBFS, con un picco
+   massimo di -1,5 dBFS), così i personaggi hanno volumi simili e l'MP3 non satura: si cambia con
+   `--livello -22` o si disattiva con `--senza-livellamento`. Solo all'esportazione, la cache resta
+   com'è. I nomi dei file MP3 contengono una sigla delle impostazioni (bitrate e livello): il sito li
+   serve con cache "immutable", e così cambiando le impostazioni i browser scaricano i file nuovi.
+
+   Per un copione di circa 320 battute: 327 file, circa 31 MB a 96 kbps, 21 MB a 64 kbps (il limite di Cloudflare è
    20.000 file, 25 MiB ciascuno). Prova in locale: `python3 -m http.server 8767 --directory dist`.
 
 2. **Pubblica** (serve Node; il primo comando apre il browser per autorizzare il tuo account Cloudflare):
