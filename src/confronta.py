@@ -8,6 +8,11 @@ maschile), le fa leggere da Kokoro e da alcune voci Chirp 3 HD dello stesso gene
 e scrive confronto/index.html: ogni battuta ha le letture in ordine casuale, con i nomi nascosti
 finché non premi "Rivela". Le clip stanno in confronto/audio (non nella cache dei copioni).
 Al servizio Google vengono inviati solo i testi di queste battute.
+
+Per cambiare la voce di un solo personaggio:
+    python -I src/confronta.py --personaggio TERESA [--voci 6]
+legge due sue battute con la voce attuale (da testi/obiettivo_sul_lago_004.cast.json) e con altre
+voci Chirp dello stesso genere non usate dagli altri personaggi, sempre alla cieca.
 """
 import argparse
 import html
@@ -70,14 +75,16 @@ def main():
     ap.add_argument("--voci", type=int, default=4, help="voci Chirp per genere (default 4)")
     ap.add_argument("--seed", type=int, default=4)
     ap.add_argument("--cast", default=str(ROOT / "web" / "opere" / "obiettivo_sul_lago" / "cast.json"))
+    ap.add_argument("--personaggio", help="confronta solo le voci per questo personaggio")
+    ap.add_argument("--cast-chirp", default=str(ROOT / "testi" / "obiettivo_sul_lago_004.cast.json"))
     args = ap.parse_args()
 
     src = Path(args.testo)
     _, opera = lib.da_file(src.name, src.read_bytes())
-    gen = generi(Path(args.cast))
     rng = random.Random(args.seed)
     battute = [r for r in opera["righe"] if r["tipo"] == "battuta" and r["testo_tts"]]
-    campioni = scegli(battute, gen, rng)
+    gen = {} if args.personaggio else generi(Path(args.cast))
+    campioni = [] if args.personaggio else scegli(battute, gen, rng)
 
     google = GoogleChirpEngine()
     try:
@@ -91,17 +98,44 @@ def main():
           f"({len(nomi_g['F'])} femminili, {len(nomi_g['M'])} maschili)")
 
     scelta_voci = {}
-    for g in "FM":
-        pref = [f"{google.LINGUA}-Chirp3-HD-{n}" for n in PREFERITE[g]]
-        elenco = [n for n in pref if n in nomi_g[g]] + [n for n in nomi_g[g] if n not in pref]
-        scelta_voci[g] = elenco[: args.voci]
+    if args.personaggio:
+        pers = args.personaggio.strip().upper()
+        cast = json.loads(Path(args.cast_chirp).read_text(encoding="utf-8"))
+        if pers not in cast:
+            sys.exit(f"Errore: {pers} non è nel cast ({', '.join(sorted(cast))}).")
+        attuale = cast[pers]["voce"]
+        genere = dict(disponibili).get(attuale)
+        if genere not in ("FEMALE", "MALE"):
+            sys.exit(f"Errore: non conosco il genere della voce attuale ({attuale}).")
+        g = "F" if genere == "FEMALE" else "M"
+        usate = {c["voce"] for p, c in cast.items() if p != pers}
+        altre = [n for n in nomi_g[g] if n not in usate and n != attuale]
+        rng.shuffle(altre)
+        scelta_voci[g] = [attuale] + altre[: args.voci]
+        gen[pers] = g
+        prop = [r for r in battute if r["personaggio"] == pers and 80 <= len(r["testo_tts"]) <= 260]
+        if len(prop) < 2:
+            prop = [r for r in battute if r["personaggio"] == pers and len(r["testo_tts"]) >= 30]
+        rng.shuffle(prop)
+        # una battuta con domanda o esclamazione, se c'è, e una "normale"
+        prop.sort(key=lambda r: not any(c in r["testo_tts"] for c in "?!"))
+        campioni = [(f"{pers}: battuta {i}", r) for i, r in enumerate(prop[:2], 1)]
+        if not campioni:
+            sys.exit(f"Errore: nessuna battuta di {pers}.")
+        print(f"Voce attuale di {pers}: {attuale.split('-')[-1]}; "
+              f"alternative: {', '.join(n.split('-')[-1] for n in scelta_voci[g][1:])}")
+    else:
+        for g in "FM":
+            pref = [f"{google.LINGUA}-Chirp3-HD-{n}" for n in PREFERITE[g]]
+            elenco = [n for n in pref if n in nomi_g[g]] + [n for n in nomi_g[g] if n not in pref]
+            scelta_voci[g] = elenco[: args.voci]
 
     cache = ClipCache(OUT / "audio")
     caratteri_google = 0
     righe_html = []
     for titolo, r in campioni:
         g = gen[r["personaggio"]]
-        letture = [("Kokoro", KOKORO[g], "kokoro", KOKORO[g])]
+        letture = [] if args.personaggio else [("Kokoro", KOKORO[g], "kokoro", KOKORO[g])]
         letture += [("Google Chirp 3 HD", v.split("-")[-1], "google-chirp3-hd", v) for v in scelta_voci[g]]
         rng.shuffle(letture)
         voci_html = []
